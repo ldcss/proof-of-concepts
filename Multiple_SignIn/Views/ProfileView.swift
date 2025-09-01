@@ -15,6 +15,9 @@ struct ProfileView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var appState: AppStateViewModel
     @State private var selectedItem: PhotosPickerItem?
+    @State private var showCreateActivity = false
+    @State private var showTrackActivities = false
+    @State private var showMyActivities = false
     
     init(userProfile: UserProfile, family: Family?) {
         self._viewModel = StateObject(wrappedValue: ProfileViewModel(userProfile: userProfile, family: family))
@@ -32,6 +35,9 @@ struct ProfileView: View {
                 // Family Information
                 if let family = viewModel.family {
                     familyInfoSection(family: family)
+                    
+                    // Activities Section - Role-based UI
+                    activitiesSection(family: family)
                 }
                 
                 // Logout Button
@@ -67,6 +73,19 @@ struct ProfileView: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showCreateActivity) {
+            if let family = viewModel.family {
+                CreateActivityView(family: family)
+            }
+        }
+        .sheet(isPresented: $showTrackActivities) {
+            if let family = viewModel.family {
+                TrackActivitiesView(family: family)
+            }
+        }
+        .sheet(isPresented: $showMyActivities) {
+            MyActivitiesView(userProfile: viewModel.userProfile)
         }
         .overlay(
             Group {
@@ -186,6 +205,63 @@ struct ProfileView: View {
             .padding()
             .background(Color(.systemGray6))
             .cornerRadius(12)
+            .padding(.horizontal)
+        }
+    }
+    
+    private func activitiesSection(family: Family) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Activities")
+                .font(.headline)
+                .padding(.horizontal)
+            
+            VStack(spacing: 12) {
+                if isCreator(family: family) {
+                    // Father/Creator UI
+                    Button(action: { showCreateActivity = true }) {
+                        HStack {
+                            Image(systemName: "plus.circle.fill")
+                            Text("Create New Activity")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                        }
+                        .font(.subheadline)
+                        .foregroundColor(.blue)
+                        .padding()
+                        .background(Color.blue.opacity(0.1))
+                        .cornerRadius(8)
+                    }
+                    
+                    Button(action: { showTrackActivities = true }) {
+                        HStack {
+                            Image(systemName: "chart.line.uptrend.xyaxis")
+                            Text("Track All Activities")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                        }
+                        .font(.subheadline)
+                        .foregroundColor(.green)
+                        .padding()
+                        .background(Color.green.opacity(0.1))
+                        .cornerRadius(8)
+                    }
+                } else {
+                    // Child/Member UI
+                    Button(action: { showMyActivities = true }) {
+                        HStack {
+                            Image(systemName: "target")
+                            Text("My Activities")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                        }
+                        .font(.subheadline)
+                        .foregroundColor(.purple)
+                        .padding()
+                        .background(Color.purple.opacity(0.1))
+                        .cornerRadius(8)
+                    }
+                }
+            }
             .padding(.horizontal)
         }
     }

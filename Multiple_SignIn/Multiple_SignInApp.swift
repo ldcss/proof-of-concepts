@@ -16,6 +16,10 @@ struct Multiple_SignInApp: App {
         WindowGroup {
             if appState.isLoading {
                 LoadingView()
+                    .onAppear {
+                        // Attempt to restore session on app launch
+                        appState.restoreSessionOnLaunch()
+                    }
             } else if appState.isLoggedIn, let userProfile = appState.currentUser {
                 ProfileView(userProfile: userProfile, family: appState.currentFamily)
                     .environmentObject(appState)

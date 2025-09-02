@@ -12,6 +12,7 @@ import Combine
 /// Protocol defining authentication operations
 protocol AuthenticationServiceProtocol {
     func signInWithApple() -> AnyPublisher<AppleSignInResult, Error>
+    func restoreAppleSession() -> AnyPublisher<String, Error>
 }
 
 /// Service responsible for handling Apple Sign In authentication
@@ -20,6 +21,7 @@ final class AuthenticationService: NSObject, AuthenticationServiceProtocol {
     // MARK: - Properties
     
     private var currentAuthorizationSubject: PassthroughSubject<AppleSignInResult, Error>?
+    private var currentRestoreSubject: PassthroughSubject<String, Error>?
     
     // MARK: - Public Methods
     
@@ -37,6 +39,41 @@ final class AuthenticationService: NSObject, AuthenticationServiceProtocol {
         authorizationController.performRequests()
         
         return subject.eraseToAnyPublisher()
+    }
+    
+    /// Restores Apple session from stored credentials
+    func restoreAppleSession() -> AnyPublisher<String, Error> {
+        return Future<String, Error> { promise in
+            // Check if we have a stored Apple User ID
+            guard let storedUserId = KeychainStore.loadAppleUserId() else {
+                promise(.failure(AuthenticationError.noStoredCredentials))
+                return
+            }
+            
+            // Check the credential state with Apple
+            let provider = ASAuthorizationAppleIDProvider()
+            provider.getCredentialState(forUserID: storedUserId) { credentialState, error in
+                if let error = error {
+                    promise(.failure(AuthenticationError.credentialCheckFailed(error)))
+                    return
+                }
+                
+                switch credentialState {
+                case .authorized, .transferred:
+                    // Valid credentials, restore session
+                    promise(.success(storedUserId))
+                case .revoked, .notFound:
+                    // Invalid credentials, delete from Keychain
+                    KeychainStore.deleteAppleUserId()
+                    promise(.failure(AuthenticationError.credentialsRevoked))
+                @unknown default:
+                    // Unknown state, treat as invalid
+                    KeychainStore.deleteAppleUserId()
+                    promise(.failure(AuthenticationError.unknownCredentialState))
+                }
+            }
+        }
+        .eraseToAnyPublisher()
     }
 }
 
@@ -61,6 +98,9 @@ extension AuthenticationService: ASAuthorizationControllerDelegate {
             email: email ?? "",
             fullName: name.isEmpty ? "Unknown User" : name
         )
+        
+        // Save userIdentifier to Keychain
+        KeychainStore.saveAppleUserId(userIdentifier)
         
         currentAuthorizationSubject?.send(result)
         currentAuthorizationSubject?.send(completion: .finished)
@@ -99,6 +139,10 @@ struct AppleSignInResult {
 enum AuthenticationError: LocalizedError {
     case invalidCredentials
     case authorizationFailed(Error)
+    case noStoredCredentials
+    case credentialCheckFailed(Error)
+    case credentialsRevoked
+    case unknownCredentialState
     
     var errorDescription: String? {
         switch self {
@@ -106,6 +150,14 @@ enum AuthenticationError: LocalizedError {
             return "Invalid credentials received from Apple Sign In"
         case .authorizationFailed(let error):
             return "Apple Sign In failed: \(error.localizedDescription)"
+        case .noStoredCredentials:
+            return "No stored credentials found for Apple Sign In"
+        case .credentialCheckFailed(let error):
+            return "Failed to check Apple credential state: \(error.localizedDescription)"
+        case .credentialsRevoked:
+            return "Apple credentials were revoked. Please sign in again."
+        case .unknownCredentialState:
+            return "Apple credential state is unknown. Please sign in again."
         }
     }
 }

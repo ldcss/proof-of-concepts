@@ -13,29 +13,43 @@ final class KeychainStore {
     
     // MARK: - Constants
     
-    private static let appleUserIdKey = "com.family.signin.appleUserId"
-    private static let service = "com.family.signin.keychain"
+    private static let service = "com.yourapp.appleSignIn"
+    private static let appleUserIdKey = "appleUserId"
     
     // MARK: - Public Methods
     
     /// Saves the Apple User ID to Keychain
     static func saveAppleUserId(_ userId: String) {
-        let data = Data(userId.utf8)
+        // First delete any existing entry to avoid duplicates
+        deleteAppleUserId()
+        
+        guard let data = userId.data(using: .utf8) else {
+            return
+        }
         
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: appleUserIdKey,
-            kSecValueData as String: data
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
         ]
         
-        // Delete any existing item
-        SecItemDelete(query as CFDictionary)
-        
-        // Add new item
         let status = SecItemAdd(query as CFDictionary, nil)
-        if status != errSecSuccess {
-            print("Failed to save Apple User ID to Keychain: \(status)")
+        
+        // If add fails, try to update existing item
+        if status == errSecDuplicateItem {
+            let updateQuery: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: appleUserIdKey
+            ]
+            
+            let updateAttributes: [String: Any] = [
+                kSecValueData as String: data
+            ]
+            
+            SecItemUpdate(updateQuery as CFDictionary, updateAttributes as CFDictionary)
         }
     }
     
@@ -49,16 +63,14 @@ final class KeychainStore {
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
         
-        var dataTypeRef: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &dataTypeRef)
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
         
-        guard status == errSecSuccess,
-              let data = dataTypeRef as? Data,
-              let userId = String(data: data, encoding: .utf8) else {
+        if status == errSecSuccess, let data = result as? Data, let userId = String(data: data, encoding: .utf8) {
+            return userId
+        } else {
             return nil
         }
-        
-        return userId
     }
     
     /// Deletes the Apple User ID from Keychain
@@ -70,8 +82,5 @@ final class KeychainStore {
         ]
         
         let status = SecItemDelete(query as CFDictionary)
-        if status != errSecSuccess && status != errSecItemNotFound {
-            print("Failed to delete Apple User ID from Keychain: \(status)")
-        }
     }
 }

@@ -124,6 +124,9 @@ final class FatherAuthViewModel: ObservableObject {
     }
     
     private func loginExistingCreator(_ userProfile: UserProfile, family: Family) {
+        // Ensure keychain persistence for family creators
+        authenticationService.ensureKeychainPersistence(userProfile.appleUserIdentifier)
+        
         isLoading = false
         isAuthenticated = true
         appState?.loginUser(userProfile, family: family)
@@ -174,6 +177,9 @@ final class FatherAuthViewModel: ObservableObject {
                 }
             },
             receiveValue: { [weak self] (userProfile, family) in
+                // Ensure keychain persistence for new family creators (same as family members)
+                self?.authenticationService.ensureKeychainPersistence(authResult.userIdentifier)
+                
                 self?.isLoading = false
                 self?.isAuthenticated = true
                 self?.appState?.loginUser(userProfile, family: family)

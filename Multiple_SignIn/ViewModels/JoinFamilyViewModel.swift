@@ -165,6 +165,9 @@ final class JoinFamilyViewModel: ObservableObject {
     }
     
     private func loginExistingMember(_ userProfile: UserProfile, family: Family) {
+        // Ensure keychain persistence for family members (same as family creators)
+        authenticationService.ensureKeychainPersistence(userProfile.appleUserIdentifier)
+        
         isLoading = false
         isAuthenticated = true
         appState?.loginUser(userProfile, family: family)
@@ -195,8 +198,12 @@ final class JoinFamilyViewModel: ObservableObject {
                 }
             },
             receiveValue: { [weak self] userProfile in
+                // Ensure keychain persistence for new family members (same as family creators)
+                self?.authenticationService.ensureKeychainPersistence(authResult.userIdentifier)
+                
                 self?.isLoading = false
                 self?.isAuthenticated = true
+                guard let family = self?.foundFamily else { return }
                 self?.appState?.loginUser(userProfile, family: family)
             }
         )

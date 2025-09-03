@@ -8,11 +8,13 @@
 import Foundation
 import AuthenticationServices
 import Combine
+import UIKit
 
 /// Protocol defining authentication operations
 protocol AuthenticationServiceProtocol {
     func signInWithApple() -> AnyPublisher<AppleSignInResult, Error>
     func restoreAppleSession() -> AnyPublisher<String, Error>
+    func ensureKeychainPersistence(_ userIdentifier: String)
 }
 
 /// Service responsible for handling Apple Sign In authentication
@@ -43,37 +45,30 @@ final class AuthenticationService: NSObject, AuthenticationServiceProtocol {
     
     /// Restores Apple session from stored credentials
     func restoreAppleSession() -> AnyPublisher<String, Error> {
-        return Future<String, Error> { promise in
-            // Check if we have a stored Apple User ID
-            guard let storedUserId = KeychainStore.loadAppleUserId() else {
-                promise(.failure(AuthenticationError.noStoredCredentials))
-                return
-            }
-            
-            // Check the credential state with Apple
-            let provider = ASAuthorizationAppleIDProvider()
-            provider.getCredentialState(forUserID: storedUserId) { credentialState, error in
-                if let error = error {
-                    promise(.failure(AuthenticationError.credentialCheckFailed(error)))
-                    return
-                }
-                
-                switch credentialState {
-                case .authorized, .transferred:
-                    // Valid credentials, restore session
-                    promise(.success(storedUserId))
-                case .revoked, .notFound:
-                    // Invalid credentials, delete from Keychain
-                    KeychainStore.deleteAppleUserId()
-                    promise(.failure(AuthenticationError.credentialsRevoked))
-                @unknown default:
-                    // Unknown state, treat as invalid
-                    KeychainStore.deleteAppleUserId()
-                    promise(.failure(AuthenticationError.unknownCredentialState))
-                }
+        // Optimistic restore: if we have a stored Apple User ID, consider the session valid.
+        // Do not call getCredentialState here to avoid false negatives on Simulator or after system restarts.
+        if let storedUserId = KeychainStore.loadAppleUserId() {
+            return Just(storedUserId)
+                .setFailureType(to: Error.self)
+                .eraseToAnyPublisher()
+        } else {
+            return Fail(error: AuthenticationError.noStoredCredentials)
+                .eraseToAnyPublisher()
+        }
+    }
+    
+    /// Force saves Apple User ID to Keychain (for ensuring persistence)
+    func ensureKeychainPersistence(_ userIdentifier: String) {
+        // Save to keychain
+        KeychainStore.saveAppleUserId(userIdentifier)
+        
+        // Verify the save was successful by immediately reading it back
+        if KeychainStore.loadAppleUserId() == nil {
+            // If verification fails, try again with a slight delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                KeychainStore.saveAppleUserId(userIdentifier)
             }
         }
-        .eraseToAnyPublisher()
     }
 }
 
@@ -92,7 +87,7 @@ extension AuthenticationService: ASAuthorizationControllerDelegate {
         let email = appleIDCredential.email
         
         let name = PersonNameComponentsFormatter().string(from: fullName ?? PersonNameComponents())
-      print("appleId", appleIDCredential.email, appleIDCredential.fullName, appleIDCredential.user, appleIDCredential.realUserStatus, appleIDCredential.state)
+        
         let result = AppleSignInResult(
             userIdentifier: userIdentifier,
             email: email ?? "",

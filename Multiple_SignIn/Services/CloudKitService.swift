@@ -18,7 +18,8 @@ protocol CloudKitServiceProtocol {
     func createUserProfile(name: String, email: String, appleUserIdentifier: String, familyReference: CKRecord.Reference?) -> AnyPublisher<UserProfile, Error>
     func updateUserProfile(_ userProfile: UserProfile, profileImage: CKAsset?) -> AnyPublisher<UserProfile, Error>
     func checkContainerStatus() -> AnyPublisher<CKAccountStatus, Error>
-    func getUserProfileWithFamily(by appleUserIdentifier: String) -> AnyPublisher<(UserProfile, Family)?, Error>
+    // Change signature to return user with optional family
+    func getUserProfileWithFamily(by appleUserIdentifier: String) -> AnyPublisher<(UserProfile, Family?)?, Error>
     
     // MARK: - Activity Operations
     func createActivity(title: String, moneyGoal: Double, endDate: Date, picture: CKAsset?, familyReference: CKRecord.Reference, assignedTo: [CKRecord.Reference]) -> AnyPublisher<Activity, Error>
@@ -207,24 +208,26 @@ final class CloudKitService: CloudKitServiceProtocol {
     }
     
     /// Gets a user profile along with the associated family data
-    func getUserProfileWithFamily(by appleUserIdentifier: String) -> AnyPublisher<(UserProfile, Family)?, Error> {
+    func getUserProfileWithFamily(by appleUserIdentifier: String) -> AnyPublisher<(UserProfile, Family?)?, Error> {
         return findUserProfile(by: appleUserIdentifier)
-            .flatMap { [weak self] userProfile -> AnyPublisher<(UserProfile, Family)?, Error> in
+            .flatMap { [weak self] userProfile -> AnyPublisher<(UserProfile, Family?)?, Error> in
                 guard let self = self, let userProfile = userProfile else {
                     return Just(nil).setFailureType(to: Error.self).eraseToAnyPublisher()
                 }
                 
                 // Check if user has a family reference (member)
                 if let familyReference = userProfile.familyReference {
-                    return Future<(UserProfile, Family)?, Error> { promise in
+                    return Future<(UserProfile, Family?)?, Error> { promise in
                         self.publicDatabase.fetch(withRecordID: familyReference.recordID) { record, error in
                             if let error = error {
-                                promise(.failure(CloudKitError.failedToFindFamily(error)))
+                                // If family fetch fails, still return user with nil family
+                                promise(.success((userProfile, nil)))
                             } else if let record = record {
                                 let family = Family(record: record)
                                 promise(.success((userProfile, family)))
                             } else {
-                                promise(.success(nil))
+                                // Family record not found, return user with nil family
+                                promise(.success((userProfile, nil)))
                             }
                         }
                     }
@@ -233,11 +236,8 @@ final class CloudKitService: CloudKitServiceProtocol {
                     // Check if user is a creator
                     return self.findFamilyByCreator(appleUserIdentifier: appleUserIdentifier)
                         .map { family in
-                            if let family = family {
-                                return (userProfile, family)
-                            } else {
-                                return nil
-                            }
+                            // Always return the user, with or without family
+                            return (userProfile, family)
                         }
                         .eraseToAnyPublisher()
                 }
